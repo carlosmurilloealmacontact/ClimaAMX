@@ -129,7 +129,14 @@ st.caption("Resultados de la encuesta · conectado en vivo a Google Sheets")
 
 with st.sidebar:
     st.header("Filtros")
-    coordinators = sorted(data[coordinator_col].dropna().unique()) if coordinator_col else []
+    # La hoja no tiene una columna de estado activo. Usamos el criterio
+    # observable en esta encuesta: el coordinador debe tener al menos una
+    # respuesta de una persona con rol Agente.
+    if coordinator_col:
+        agent_rows = data[data[role_col].astype("string").str.strip().str.casefold().eq("agente")]
+        coordinators = sorted(agent_rows[coordinator_col].dropna().unique())
+    else:
+        coordinators = []
     services = sorted(data[service_col].dropna().unique())
     leaders = sorted(data[leader_col].dropna().unique()) if leader_col else []
     coordinator = st.multiselect("Coordinador", coordinators) if coordinator_col else []
