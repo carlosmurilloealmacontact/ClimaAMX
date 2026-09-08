@@ -40,6 +40,7 @@ def load_data():
     question_cols = [c for c in df.columns if c.startswith("Preguntas [")]
     comment_cols = [c for c in df.columns if c.lower() == "comentarios"]
     role_col = "¿Cuál es tu rol?"
+    coordinator_col = next((c for c in ("Coordinador", "Coordinador/a") if c in df.columns), None)
     leader_col = next((c for c in ("Lider", "Líder", "Líder directo") if c in df.columns), None)
     # Un mismo formulario puede traer una columna de servicio parcialmente
     # diligenciada. Consolidamos ambas fuentes para evitar mostrar NaN.
@@ -53,7 +54,7 @@ def load_data():
         service_col = "Area"
     for col in question_cols:
         df[col] = df[col].astype("string").str.strip()
-    return df, question_cols, comment_cols[0] if comment_cols else None, role_col, service_col, leader_col
+    return df, question_cols, comment_cols[0] if comment_cols else None, role_col, service_col, leader_col, coordinator_col
 
 
 def label_question(col):
@@ -113,7 +114,7 @@ if dashboard_password:
 
 with st.spinner("Cargando respuestas..."):
     try:
-        data, question_cols, comment_col, role_col, service_col, leader_col = load_data()
+        data, question_cols, comment_col, role_col, service_col, leader_col, coordinator_col = load_data()
     except RuntimeError as exc:
         st.error("No se pudieron cargar los datos desde Google Sheets.")
         st.warning(str(exc))
@@ -128,17 +129,17 @@ st.caption("Resultados de la encuesta · conectado en vivo a Google Sheets")
 
 with st.sidebar:
     st.header("Filtros")
-    roles = sorted(data[role_col].dropna().unique())
+    coordinators = sorted(data[coordinator_col].dropna().unique()) if coordinator_col else []
     services = sorted(data[service_col].dropna().unique())
     leaders = sorted(data[leader_col].dropna().unique()) if leader_col else []
-    role = st.multiselect("Rol", roles)
+    coordinator = st.multiselect("Coordinador", coordinators) if coordinator_col else []
     leader = st.multiselect("Líder", leaders) if leader_col else []
     service = st.multiselect("Servicio", services)
     if st.button("🔄 Recargar datos"):
         load_data.clear(); st.rerun()
 
 df = data.copy()
-if role: df = df[df[role_col].isin(role)]
+if coordinator_col and coordinator: df = df[df[coordinator_col].isin(coordinator)]
 if leader_col and leader: df = df[df[leader_col].isin(leader)]
 if service: df = df[df[service_col].isin(service)]
 if df.empty:
@@ -174,6 +175,31 @@ counts = long.groupby(["Pregunta", "Respuesta"]).size().reset_index(name="Respue
 fig2 = px.bar(counts, x="Pregunta", y="Respuestas", color="Respuesta", text="Respuestas", barmode="stack", color_discrete_map=COLORS)
 fig2.update_layout(height=370, plot_bgcolor="white", paper_bgcolor="white")
 st.plotly_chart(fig2, use_container_width=True)
+
+st.subheader("Comparación de favorabilidad por servicio")
+st.caption("Cada celda muestra el porcentaje de respuestas “Siempre” o “Casi siempre” para la pregunta y el servicio seleccionados.")
+comparison = []
+for service_name, service_df in df.groupby(service_col, dropna=False):
+    for i, question_col in enumerate(question_cols):
+        comparison.append({"Servicio": str(service_name), "Pregunta": f"P{i+1}",
+                           "Favorabilidad": favorability(service_df, [question_col]),
+                           "Texto": label_question(question_col)})
+comparison_df = pd.DataFrame(comparison)
+if comparison_df.empty:
+    st.info("No hay datos suficientes para comparar servicios.")
+else:
+    heatmap = comparison_df.pivot(index="Servicio", columns="Pregunta", values="Favorabilidad")
+    heatmap = heatmap[[f"P{i+1}" for i in range(len(question_cols)) if f"P{i+1}" in heatmap.columns]]
+    fig_compare = px.imshow(heatmap, text_auto=".1f", aspect="auto", range_color=[0, 100],
+                            color_continuous_scale=["#D94A3D", "#F2A509", "#2CA148"],
+                            labels={"color": "Favorabilidad (%)"})
+    fig_compare.update_layout(height=max(300, 70 + 38 * len(heatmap)),
+                              plot_bgcolor="white", paper_bgcolor="white",
+                              margin=dict(l=10, r=10, t=30, b=10))
+    fig_compare.update_traces(customdata=heatmap.columns.tolist(),
+                              hovertemplate="Servicio: %{y}<br>Pregunta: %{x}<br>Favorabilidad: %{z:.1f}%<extra></extra>")
+    st.plotly_chart(fig_compare, use_container_width=True)
+    st.caption("Pasa el cursor por cada celda y revisa la tabla de preguntas para consultar el texto completo.")
 
 if comment_col:
     st.subheader("Comentarios abiertos")
