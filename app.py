@@ -184,7 +184,7 @@ fig2.update_layout(height=370, plot_bgcolor="white", paper_bgcolor="white")
 st.plotly_chart(fig2, use_container_width=True)
 
 st.subheader("Comparación de favorabilidad por servicio")
-st.caption("Cada celda muestra el porcentaje de respuestas “Siempre” o “Casi siempre” para la pregunta y el servicio seleccionados.")
+st.caption("Selecciona una pregunta para comparar los servicios sin acumular todos los datos en un mismo gráfico.")
 comparison = []
 for service_name, service_df in df.groupby(service_col, dropna=False):
     for i, question_col in enumerate(question_cols):
@@ -195,18 +195,26 @@ comparison_df = pd.DataFrame(comparison)
 if comparison_df.empty:
     st.info("No hay datos suficientes para comparar servicios.")
 else:
-    heatmap = comparison_df.pivot(index="Servicio", columns="Pregunta", values="Favorabilidad")
-    heatmap = heatmap[[f"P{i+1}" for i in range(len(question_cols)) if f"P{i+1}" in heatmap.columns]]
-    fig_compare = px.imshow(heatmap, text_auto=".1f", aspect="auto", range_color=[0, 100],
-                            color_continuous_scale=["#D94A3D", "#F2A509", "#2CA148"],
-                            labels={"color": "Favorabilidad (%)"})
-    fig_compare.update_layout(height=max(300, 70 + 38 * len(heatmap)),
-                              plot_bgcolor="white", paper_bgcolor="white",
-                              margin=dict(l=10, r=10, t=30, b=10))
-    fig_compare.update_traces(customdata=heatmap.columns.tolist(),
-                              hovertemplate="Servicio: %{y}<br>Pregunta: %{x}<br>Favorabilidad: %{z:.1f}%<extra></extra>")
+    question_options = {f"P{i+1} — {label_question(c)}": f"P{i+1}" for i, c in enumerate(question_cols)}
+    selected_label = st.selectbox("Pregunta a comparar", list(question_options), key="comparacion_pregunta")
+    selected_question = question_options[selected_label]
+    selected_df = comparison_df[comparison_df["Pregunta"] == selected_question].sort_values("Favorabilidad")
+    fig_compare = px.bar(selected_df, x="Favorabilidad", y="Servicio", orientation="h",
+                         text="Favorabilidad", range_x=[0, 100], color="Favorabilidad",
+                         color_continuous_scale=["#D94A3D", "#F2A509", "#2CA148"],
+                         labels={"Favorabilidad": "Favorabilidad (%)"})
+    fig_compare.update_traces(texttemplate="%{text:.1f}%", textposition="outside",
+                              hovertemplate="Servicio: %{y}<br>Favorabilidad: %{x:.1f}%<extra></extra>")
+    fig_compare.update_layout(height=max(320, 65 + 35 * len(selected_df)),
+                              plot_bgcolor="white", paper_bgcolor="white", coloraxis_showscale=False,
+                              margin=dict(l=10, r=55, t=20, b=10))
     st.plotly_chart(fig_compare, use_container_width=True)
-    st.caption("Pasa el cursor por cada celda y revisa la tabla de preguntas para consultar el texto completo.")
+    with st.expander("Ver comparación completa de todos los servicios y preguntas"):
+        full_table = comparison_df.pivot(index="Servicio", columns="Pregunta", values="Favorabilidad")
+        full_table = full_table[[f"P{i+1}" for i in range(len(question_cols)) if f"P{i+1}" in full_table.columns]]
+        st.dataframe(full_table, use_container_width=True, column_config={
+            col: st.column_config.NumberColumn(col, format="%.1f%%") for col in full_table.columns
+        })
 
 if comment_col:
     st.subheader("Comentarios abiertos")
